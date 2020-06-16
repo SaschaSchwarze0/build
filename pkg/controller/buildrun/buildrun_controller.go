@@ -9,6 +9,7 @@ import (
 	buildv1alpha1 "github.com/redhat-developer/build/pkg/apis/build/v1alpha1"
 	"github.com/redhat-developer/build/pkg/config"
 	"github.com/redhat-developer/build/pkg/ctxlog"
+	"github.com/redhat-developer/build/pkg/monitoring"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -76,6 +77,10 @@ func add(ctx context.Context, mgr manager.Manager, r reconcile.Reconciler) error
 	}
 
 	pred := predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			monitoring.OnV1Alpha1BuildRunCreated(ctx, e.Object.(*buildv1alpha1.BuildRun))
+			return true
+		},
 		UpdateFunc: func(e event.UpdateEvent) bool {
 			// Ignore updates to CR status in which case metadata.Generation does not change
 			return e.MetaOld.GetGeneration() != e.MetaNew.GetGeneration()
@@ -157,9 +162,16 @@ func (r *ReconcileBuildRun) Reconcile(request reconcile.Request) (reconcile.Resu
 	}
 
 	if lastTaskRun != nil {
+		isEnteringFailedState := false
+		isEnteringRunningState := buildRun.Status.StartTime.IsZero() && !lastTaskRun.Status.StartTime.IsZero()
+		isEnteringSucceededState := false
+
 		// TODO: Make this safer
 		if len(lastTaskRun.Status.Conditions) > 0 {
 			taskRunStatus := lastTaskRun.Status.Conditions[0].Status
+
+			isEnteringFailedState = buildRun.Status.Succeeded == corev1.ConditionUnknown && taskRunStatus == corev1.ConditionFalse
+			isEnteringSucceededState = buildRun.Status.Succeeded == corev1.ConditionUnknown && taskRunStatus == corev1.ConditionTrue
 
 			// check if we should delete the generated service account by checking the build run spec and that the task run is complete
 			if isGeneratedServiceAccountUsed(buildRun) && (taskRunStatus == corev1.ConditionTrue || taskRunStatus == corev1.ConditionFalse) {
@@ -181,6 +193,7 @@ func (r *ReconcileBuildRun) Reconcile(request reconcile.Request) (reconcile.Resu
 			}
 		}
 		buildRun.Status.LatestTaskRunRef = &lastTaskRun.Name
+
 		buildRun.Status.StartTime = lastTaskRun.Status.StartTime
 		buildRun.Status.CompletionTime = lastTaskRun.Status.CompletionTime
 		if buildRun.Status.BuildSpec == nil {
@@ -190,6 +203,17 @@ func (r *ReconcileBuildRun) Reconcile(request reconcile.Request) (reconcile.Resu
 		if err != nil {
 			return reconcile.Result{}, err
 		}
+
+		if isEnteringFailedState {
+			monitoring.OnV1Alpha1BuildRunFailed(ctx, buildRun)
+		}
+		if isEnteringRunningState {
+			monitoring.OnV1Alpha1BuildRunRunning(ctx, buildRun)
+		}
+		if isEnteringSucceededState {
+			monitoring.OnV1Alpha1BuildRunSucceeded(ctx, buildRun)
+		}
+
 		return reconcile.Result{}, nil
 	}
 
@@ -375,6 +399,9 @@ func (r *ReconcileBuildRun) updateBuildRunErrorStatus(ctx context.Context, build
 	now := metav1.Now()
 	buildRun.Status.StartTime = &now
 	updateErr := r.client.Status().Update(ctx, buildRun)
+	if updateErr == nil {
+		monitoring.OnV1Alpha1BuildRunFailed(ctx, buildRun)
+	}
 	return updateErr
 }
 

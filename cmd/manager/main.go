@@ -25,6 +25,7 @@ import (
 	sdkVersion "github.com/operator-framework/operator-sdk/version"
 	"github.com/redhat-developer/build/pkg/apis"
 	"github.com/redhat-developer/build/pkg/controller"
+	"github.com/redhat-developer/build/pkg/monitoring/prometheus"
 	"github.com/redhat-developer/build/version"
 	"github.com/spf13/pflag"
 	v1 "k8s.io/api/core/v1"
@@ -136,6 +137,8 @@ func main() {
 
 	// Add the Metrics Service
 	addMetrics(ctx, cfg, namespace)
+
+	prometheus.InitPrometheus(c)
 
 	ctxlog.Info(ctx, "Starting the Cmd.")
 
