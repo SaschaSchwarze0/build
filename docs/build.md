@@ -6,8 +6,8 @@
   - [Defining the Source](#defining-the-source)
   - [Defining the Strategy](#defining-the-strategy)
   - [Defining the Builder or Dockerfile](#defining-the-builder-or-dockerfile)
-  - [Defining Resources](#defining-resources)
   - [Defining the Output](#defining-the-output)
+  - [Runtime-Image](#Runtime-Image)
 - [Using Finalizers](#using-finalizers)
 
 ## Overview
@@ -18,7 +18,6 @@ A `Build` resource allows the user to define:
 - strategy
 - builder
 - dockerfile
-- resources
 - output
 
 A `Build` is available within a namespace.
@@ -44,14 +43,14 @@ The `Build` definition supports the following fields:
   - [`metadata`](https://kubernetes.io/docs/concepts/overview/working-with-objects/kubernetes-objects/#required-fields) - Metadata that identify the CRD instance, for example the name of the `Build`.
   - `spec.source.URL` - Refers to the Git repository containing the source code.
   - `spec.strategy` - Refers to the `BuildStrategy` to be used, see the [examples](../samples/buildstrategy)
-  - `spec.builder.image` - Refers to the image containing the build tools to build the source code. (_Use this path for Dockerless strategies_)
+  - `spec.builder.image` - Refers to the image containing the build tools to build the source code. (_Use this path for Dockerless strategies, this is just required for `source-to-image` buildStrategy_)
   - `spec.output`- Refers to the location where the generated image would be pushed.
   - `spec.output.credentials.name`- Reference an existing secret to get access to the container registry.
 
 - Optional:
-  - `spec.resources` - Refers to the compute [resources](https://kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/) used on the container where the image is built.
   - `spec.parameters` - Refers to a list of `name-value` that could be used to loosely type parameters in the `BuildStrategy`.
   - `spec.dockerfile` - Path to a Dockerfile to be used for building an image. (_Use this path for strategies that require a Dockerfile_)
+  - `spec.runtime` - Runtime-Image settings, to be used for a multi-stage build.
   - `spec.timeout` - Defines a custom timeout. The value needs to be parsable by [ParseDuration](https://golang.org/pkg/time/#ParseDuration), for example `5m`. The default is ten minutes. The value can be overwritten in the `BuildRun`.
   - `metadata.annotations[build.build.dev/build-run-deletion]` - Defines if delete all related BuildRuns when deleting the Build. The default is `false`.
 
@@ -59,9 +58,9 @@ The `Build` definition supports the following fields:
 
 A `Build` resource can specify a Git source, together with other parameters like:
 
-- `source.credentials.name` - For private repositories, the name is a reference to an existing secret on the same namespace containing the require `ssh` data.
+- `source.credentials.name` - For private repositories, the name is a reference to an existing secret on the same namespace containing the `ssh` data.
 - `source.revision` - An specific revision to select from the source repository, this can be a commit or branch name.
-- `source.contextDir` - For repositories where the source code is not located at the root folder, you can specify this path here. Currently only supported by `buildah`, `kaniko` and `buildpacks` build strategies.
+- `source.contextDir` - For repositories where the source code is not located at the root folder, you can specify this path here. Currently, only supported by `buildah`, `kaniko` and `buildpacks` build strategies.
 
 Example of a `Build` with a source with **credentials** defined by the user.
 
@@ -107,10 +106,10 @@ spec:
 
 A `Build` resource can specify the `BuildStrategy` to use, these are:
 
-- [Source-to-Image](docs/buildstrategies.md#source-to-image)
-- [Buildpacks-v3](docs/buildstrategies.md#buildpacks-v3)
-- [Buildah](docs/buildstrategies.md#buildah)
-- [Kaniko](docs/buildstrategies.md#kaniko)
+- [Source-to-Image](buildstrategies.md#source-to-image)
+- [Buildpacks-v3](buildstrategies.md#buildpacks-v3)
+- [Buildah](buildstrategies.md#buildah)
+- [Kaniko](buildstrategies.md#kaniko)
 
 Defining the strategy is straightforward, you need to define the `name` and the `kind`. For example:
 
@@ -144,43 +143,21 @@ spec:
   dockerfile: Dockerfile
 ```
 
-Another example, when the user chooses to use a `builder` image:
+Another example, when the user chooses to use a `builder` image ( This is required for `source-to-image` buildStrategy, because for different code languages, they have different builders. ):
 
 ```yaml
 apiVersion: build.dev/v1alpha1
 kind: Build
 metadata:
-  name: buildpack-nodejs-build
+  name: s2i-nodejs-build
 spec:
   source:
     url: https://github.com/sclorg/nodejs-ex
   strategy:
-    name: buildpacks-v3
+    name: source-to-image
     kind: ClusterBuildStrategy
   builder:
-    image: gcr.io/paketo-buildpacks/builder:latest
-```
-
-### Defining Resources
-
-A `Build` CRD instance can specify resources for the pod that builds the image, for example:
-
-```yaml
-apiVersion: build.dev/v1alpha1
-kind: Build
-metadata:
-  name: kaniko-golang-build
-spec:
-  source:
-    url: https://github.com/sbose78/taxi
-  strategy:
-    name: kaniko
-    kind: ClusterBuildStrategy
-  dockerfile: Dockerfile
-  resources:
-    limits:
-      cpu: "500m"
-      memory: "1Gi"
+    image: docker.io/centos/nodejs-10-centos7
 ```
 
 ### Defining the Output
@@ -206,7 +183,7 @@ spec:
     image: image-registry.openshift-image-registry.svc:5000/build-examples/nodejs-ex
 ```
 
-Another example, is when the user specify a private registry:
+Another example, is when the user specifies a private registry:
 
 ```yaml
 apiVersion: build.dev/v1alpha1
@@ -226,6 +203,60 @@ spec:
     credentials:
       name: icr-knbuild
 ```
+
+### Runtime-Image
+
+Runtime-image is a new image composed with build-strategy outcome. On which you can compose a multi-stage image build, copying parts out the original image into a new one. This feature allows replacing the base-image of any container-image, creating leaner images, and other use-cases.
+
+The following examples illustrates how to the `runtime`:
+
+```yml
+apiVersion: build.dev/v1alpha1
+kind: Build
+metadata:
+  name: nodejs-ex-runtime
+spec:
+  strategy:
+    name: buildpacks-v3
+    kind: ClusterBuildStrategy
+  source:
+    url: https://github.com/sclorg/nodejs-ex.git
+  output:
+    image: image-registry.openshift-image-registry.svc:5000/build-examples/nodejs-ex
+  runtime:
+    base:
+      image: docker.io/node:latest
+    workDir: /home/node/app
+    run:
+      - echo "Before copying data..."
+    user:
+      name: node
+      group: "1000"
+    paths:
+      - $(workspace):/home/node/app
+    entrypoint:
+      - npm
+      - start
+```
+
+This build will produce a Node.js based application where a single directory is imported from the image built by buildpacks strategy. The data copied is using the `.spec.runtime.user` directive, and the image also runs based on it.
+
+Please consider the description of the attributes under `.spec.runtime`:
+
+- `.base`: specifies the runtime base-image to be used, using Image as type
+- `.workDir`: path to WORKDIR in runtime-image
+- `.env`: runtime-image additional environment variables, key-value
+- `.labels`: runtime-image additional labels, key-value
+- `.run`: arbitrary commands to be executed as `RUN` blocks, before `COPY`
+- `.user.name`: username employed on `USER` directive, and also to change ownership of files copied to the runtime-image
+- `.user.group`: group name (or GID), employed to change ownership and on `USER` directive
+- `.paths`: list of files or directory paths to be copied to runtime-image, those can be defined as `<source>:<destination>` split by colon (`:`). You can use the `$(workspace)` placeholder to access the directory where your source repository is cloned, if `spec.source.contextDir` is defined, then `$(workspace)` to context directory location
+- `.entrypoint`: entrypoint command, specified as a list
+
+> ⚠️ **Image Tag Overwrite**
+>
+> Specifying the runtime section will cause a `BuildRun` to push `spec.output.image` twice. First, the image produced by chosen `BuildStrategy` is pushed, and next it gets reused to construct the runtime-image, which is pushed again, overwriting `BuildStrategy` outcome.
+> Be aware, specially in situations where the image push action triggers automation steps. Since the same tag will be reused, you might need to take this in consideration when using runtime-images.
 
 ## Using Finalizers
 

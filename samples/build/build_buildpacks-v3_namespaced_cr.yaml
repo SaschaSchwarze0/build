@@ -9,14 +9,5 @@ spec:
   strategy:
     name: buildpacks-v3
     kind: BuildStrategy
-  builder:
-    image: gcr.io/paketo-buildpacks/builder:latest
-  resources:
-    limits:
-      cpu: "500m"
-      memory: "1Gi"
-    request:
-      cpu: "500m"
-      memory: "1Gi"
   output:
     image: image-registry.openshift-image-registry.svc:5000/build-examples/taxi-app

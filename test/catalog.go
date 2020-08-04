@@ -4,7 +4,9 @@ import (
 	"context"
 	"strconv"
 
+	"knative.dev/pkg/apis"
 	knativev1beta1 "knative.dev/pkg/apis/duck/v1beta1"
+	"sigs.k8s.io/yaml"
 
 	. "github.com/onsi/gomega"
 	build "github.com/redhat-developer/build/pkg/apis/build/v1alpha1"
@@ -12,6 +14,7 @@ import (
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -96,6 +99,7 @@ func (c *Catalog) BuildWithCustomAnnotationAndFinalizer(
 	a map[string]string,
 	f []string,
 ) *build.Build {
+	buildStrategy := build.ClusterBuildStrategyKind
 	return &build.Build{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
@@ -106,6 +110,10 @@ func (c *Catalog) BuildWithCustomAnnotationAndFinalizer(
 		Spec: build.BuildSpec{
 			Source: build.GitSource{
 				URL: "foobar",
+			},
+			StrategyRef: &build.StrategyRef{
+				Name: strategyName,
+				Kind: &buildStrategy,
 			},
 		},
 	}
@@ -277,8 +285,35 @@ func (c *Catalog) StubBuildRunGetWithoutSA(
 	}
 }
 
-// StubBuildRunGetWithSA simulates the output of client GET calls
-// for the BuildRun unit tests
+// StubBuildRunGetWithTaskRunAndSA returns fake object for different
+// client calls
+func (c *Catalog) StubBuildRunGetWithTaskRunAndSA(
+	b *build.Build,
+	br *build.BuildRun,
+	tr *v1beta1.TaskRun,
+	sa *corev1.ServiceAccount,
+) func(context context.Context, nn types.NamespacedName, object runtime.Object) error {
+	return func(context context.Context, nn types.NamespacedName, object runtime.Object) error {
+		switch object := object.(type) {
+		case *build.Build:
+			b.DeepCopyInto(object)
+			return nil
+		case *build.BuildRun:
+			br.DeepCopyInto(object)
+			return nil
+		case *v1beta1.TaskRun:
+			tr.DeepCopyInto(object)
+			return nil
+		case *corev1.ServiceAccount:
+			sa.DeepCopyInto(object)
+			return nil
+		}
+		return errors.NewNotFound(schema.GroupResource{}, nn.Name)
+	}
+}
+
+// StubBuildRunGetWithSA returns fake object for different
+// client calls
 func (c *Catalog) StubBuildRunGetWithSA(
 	b *build.Build,
 	br *build.BuildRun,
@@ -331,13 +366,6 @@ func (c *Catalog) StubBuildRunGetWithSAandStrategies(
 	}
 }
 
-// DefaultTaskRunList returns a minimal tekton TaskRunList
-func (c *Catalog) DefaultTaskRunList(tr *v1beta1.TaskRun) *v1beta1.TaskRunList {
-	return &v1beta1.TaskRunList{
-		Items: []v1beta1.TaskRun{*tr},
-	}
-}
-
 // DefaultTaskRunWithStatus returns a minimal tektont TaskRun with an Status
 func (c *Catalog) DefaultTaskRunWithStatus(trName string, status corev1.ConditionStatus, reason string) *v1beta1.TaskRun {
 	return &v1beta1.TaskRun{
@@ -349,8 +377,31 @@ func (c *Catalog) DefaultTaskRunWithStatus(trName string, status corev1.Conditio
 			Status: knativev1beta1.Status{
 				Conditions: knativev1beta1.Conditions{
 					{
+						Type:   apis.ConditionSucceeded,
 						Reason: reason,
 						Status: status,
+					},
+				},
+			},
+		},
+	}
+}
+
+// DefaultTaskRunWithFalseStatus returns a minimal tektont TaskRun with a FALSE status
+func (c *Catalog) DefaultTaskRunWithFalseStatus(trName string) *v1beta1.TaskRun {
+	return &v1beta1.TaskRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: trName,
+		},
+		Spec: v1beta1.TaskRunSpec{},
+		Status: v1beta1.TaskRunStatus{
+			Status: knativev1beta1.Status{
+				Conditions: knativev1beta1.Conditions{
+					{
+						Type:    apis.ConditionSucceeded,
+						Reason:  "something bad happened",
+						Status:  corev1.ConditionFalse,
+						Message: "some message",
 					},
 				},
 			},
@@ -369,6 +420,28 @@ func (c *Catalog) DefaultBuild(buildName string, strategyName string, strategyKi
 				Name: strategyName,
 				Kind: &strategyKind,
 			},
+		},
+		Status: build.BuildStatus{
+			Registered: corev1.ConditionTrue,
+		},
+	}
+}
+
+// DefaultBuildWithFalseRegistered returns a minimal Build object with a FALSE Registered
+func (c *Catalog) DefaultBuildWithFalseRegistered(buildName string, strategyName string, strategyKind build.BuildStrategyKind) *build.Build {
+	return &build.Build{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: buildName,
+		},
+		Spec: build.BuildSpec{
+			StrategyRef: &build.StrategyRef{
+				Name: strategyName,
+				Kind: &strategyKind,
+			},
+		},
+		Status: build.BuildStatus{
+			Registered: corev1.ConditionFalse,
+			Reason: "something bad happened",
 		},
 	}
 }
@@ -435,7 +508,7 @@ func (c *Catalog) BuildRunWithSA(buildRunName string, buildName string, saName s
 	}
 }
 
-// BuildRunWithSA returns a customized BuildRun object that defines a
+// BuildRunWithSAGenerate returns a customized BuildRun object that defines a
 // service account
 func (c *Catalog) BuildRunWithSAGenerate(buildRunName string, buildName string) *build.BuildRun {
 	return &build.BuildRun{
@@ -451,4 +524,51 @@ func (c *Catalog) BuildRunWithSAGenerate(buildRunName string, buildName string) 
 			},
 		},
 	}
+}
+
+// LoadCustomResources returns a container set of resources based on cpu and memory
+func (c *Catalog) LoadCustomResources(cpu string, mem string) corev1.ResourceRequirements {
+	return corev1.ResourceRequirements{
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(cpu),
+			corev1.ResourceMemory: resource.MustParse(mem),
+		},
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(cpu),
+			corev1.ResourceMemory: resource.MustParse(mem),
+		},
+	}
+}
+
+// LoadBuildYAML parses YAML bytes into JSON and from JSON
+// into a Build struct
+func (c *Catalog) LoadBuildYAML(d []byte) (*buildv1alpha1.Build, error) {
+	b := &buildv1alpha1.Build{}
+	err := yaml.Unmarshal(d, b)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+// LoadBuildRunYAML parses YAML bytes into JSON and from JSON
+// into a BuildRun struct
+func (c *Catalog) LoadBuildRunYAML(d []byte) (*buildv1alpha1.BuildRun, error) {
+	b := &buildv1alpha1.BuildRun{}
+	err := yaml.Unmarshal(d, b)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+// LoadBuildStrategyYAML parses YAML bytes into JSON and from JSON
+// into a BuildStrategy struct
+func (c *Catalog) LoadBuildStrategyYAML(d []byte) (*buildv1alpha1.BuildStrategy, error) {
+	b := &buildv1alpha1.BuildStrategy{}
+	err := yaml.Unmarshal(d, b)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
 }

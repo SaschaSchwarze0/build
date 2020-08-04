@@ -1,12 +1,13 @@
 package buildrun
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 
 	buildv1alpha1 "github.com/redhat-developer/build/pkg/apis/build/v1alpha1"
+	"github.com/redhat-developer/build/pkg/config"
+	"github.com/redhat-developer/build/pkg/controller/utils"
 	taskv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
 	v1beta1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	corev1 "k8s.io/api/core/v1"
@@ -44,7 +45,12 @@ func getStringTransformations(fullText string) string {
 	return fullText
 }
 
-func GenerateTaskSpec(build *buildv1alpha1.Build, buildRun *buildv1alpha1.BuildRun, buildSteps []buildv1alpha1.BuildStep) (*v1beta1.TaskSpec, error) {
+func GenerateTaskSpec(
+	cfg *config.Config,
+	build *buildv1alpha1.Build,
+	buildRun *buildv1alpha1.BuildRun,
+	buildSteps []buildv1alpha1.BuildStep,
+) (*v1beta1.TaskSpec, error) {
 
 	generatedTaskSpec := v1beta1.TaskSpec{
 		Resources: &v1beta1.TaskResources{
@@ -67,14 +73,6 @@ func GenerateTaskSpec(build *buildv1alpha1.Build, buildRun *buildv1alpha1.BuildR
 		},
 		Params: []v1beta1.ParamSpec{
 			{
-				Description: "Image containing the build tools/logic",
-				Name:        inputParamBuilderImage,
-				Default: &v1beta1.ArrayOrString{
-					Type:      v1beta1.ParamTypeString,
-					StringVal: "docker.io/centos/nodejs-8-centos7", // not really needed.
-				},
-			},
-			{
 				Description: "Path to the Dockerfile",
 				Name:        inputParamDockerfile,
 				Default: &v1beta1.ArrayOrString{
@@ -94,6 +92,18 @@ func GenerateTaskSpec(build *buildv1alpha1.Build, buildRun *buildv1alpha1.BuildR
 			},
 		},
 		Steps: []v1beta1.Step{},
+	}
+
+	if build.Spec.BuilderImage != nil {
+		InputBuilderImage := v1beta1.ParamSpec{
+			Description: "Image containing the build tools/logic",
+			Name:        inputParamBuilderImage,
+			Default: &v1beta1.ArrayOrString{
+				Type:      v1beta1.ParamTypeString,
+				StringVal: build.Spec.BuilderImage.ImageURL,
+			},
+		}
+		generatedTaskSpec.Params = append(generatedTaskSpec.Params, InputBuilderImage)
 	}
 
 	var vols []corev1.Volume
@@ -121,23 +131,9 @@ func GenerateTaskSpec(build *buildv1alpha1.Build, buildRun *buildv1alpha1.BuildR
 				Args:            taskArgs,
 				SecurityContext: containerValue.SecurityContext,
 				WorkingDir:      containerValue.WorkingDir,
+				Resources:       containerValue.Resources,
 				Env:             containerValue.Env,
 			},
-		}
-		if build.Spec.Resources != nil {
-			step.Resources = *build.Spec.Resources
-			if buildRun.Spec.Resources != nil {
-				// Merge the resources from build and buildRun
-				mergedResources, err := mergedResources(build, buildRun)
-				if err != nil {
-					return nil, err
-				}
-				step.Resources = *mergedResources
-			}
-		} else {
-			if buildRun.Spec.Resources != nil {
-				step.Resources = *buildRun.Spec.Resources
-			}
 		}
 
 		generatedTaskSpec.Steps = append(generatedTaskSpec.Steps, step)
@@ -160,10 +156,24 @@ func GenerateTaskSpec(build *buildv1alpha1.Build, buildRun *buildv1alpha1.BuildR
 	}
 
 	generatedTaskSpec.Volumes = vols
+
+	// checking for runtime-image settings, and appending more steps to the strategy
+	if utils.IsRuntimeDefined(build) {
+		if err := AmendTaskSpecWithRuntimeImage(cfg, &generatedTaskSpec, build); err != nil {
+			return nil, err
+		}
+	}
+
 	return &generatedTaskSpec, nil
 }
 
-func GenerateTaskRun(build *buildv1alpha1.Build, buildRun *buildv1alpha1.BuildRun, serviceAccountName string, buildSteps []buildv1alpha1.BuildStep) (*v1beta1.TaskRun, error) {
+func GenerateTaskRun(
+	cfg *config.Config,
+	build *buildv1alpha1.Build,
+	buildRun *buildv1alpha1.BuildRun,
+	serviceAccountName string,
+	buildSteps []buildv1alpha1.BuildStep,
+) (*v1beta1.TaskRun, error) {
 
 	revision := "master"
 	if build.Spec.Source.Revision != nil {
@@ -178,15 +188,15 @@ func GenerateTaskRun(build *buildv1alpha1.Build, buildRun *buildv1alpha1.BuildRu
 		ImageURL = build.Spec.Output.ImageURL
 	}
 
-	taskSpec, err := GenerateTaskSpec(build, buildRun, buildSteps)
+	taskSpec, err := GenerateTaskSpec(cfg, build, buildRun, buildSteps)
 	if err != nil {
 		return nil, err
 	}
 
 	expectedTaskRun := &v1beta1.TaskRun{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: buildRun.Name + "-",
-			Namespace:    buildRun.Namespace,
+			Name:      buildRun.Name,
+			Namespace: buildRun.Namespace,
 			Labels: map[string]string{
 				buildv1alpha1.LabelBuild:              build.Name,
 				buildv1alpha1.LabelBuildGeneration:    strconv.FormatInt(build.Generation, 10),
@@ -276,26 +286,4 @@ func GenerateTaskRun(build *buildv1alpha1.Build, buildRun *buildv1alpha1.BuildRu
 
 	expectedTaskRun.Spec.Params = inputParams
 	return expectedTaskRun, nil
-}
-
-// mergedResources merges the resources from build spec and buildRun spec
-func mergedResources(build *buildv1alpha1.Build, buildRun *buildv1alpha1.BuildRun) (*corev1.ResourceRequirements, error) {
-	mergedResources := corev1.ResourceRequirements{}
-	buildResourceJson, err := json.Marshal(*build.Spec.Resources)
-	if err != nil {
-		return nil, err
-	}
-	json.Unmarshal(buildResourceJson, &mergedResources)
-	if err != nil {
-		return nil, err
-	}
-	buildRunResourceJson, err := json.Marshal(*buildRun.Spec.Resources)
-	if err != nil {
-		return nil, err
-	}
-	json.Unmarshal(buildRunResourceJson, &mergedResources)
-	if err != nil {
-		return nil, err
-	}
-	return &mergedResources, nil
 }

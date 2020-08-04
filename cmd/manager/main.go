@@ -22,10 +22,12 @@ import (
 	"github.com/operator-framework/operator-sdk/pkg/leader"
 	"github.com/operator-framework/operator-sdk/pkg/log/zap"
 	"github.com/operator-framework/operator-sdk/pkg/metrics"
+	"github.com/operator-framework/operator-sdk/pkg/ready"
 	sdkVersion "github.com/operator-framework/operator-sdk/version"
 	"github.com/redhat-developer/build/pkg/apis"
 	"github.com/redhat-developer/build/pkg/controller"
 	"github.com/redhat-developer/build/pkg/monitoring/prometheus"
+	buildMetrics "github.com/redhat-developer/build/pkg/metrics"
 	"github.com/redhat-developer/build/version"
 	"github.com/spf13/pflag"
 	v1 "k8s.io/api/core/v1"
@@ -90,6 +92,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	r := ready.NewFileReady()
+	err = r.Set()
+	if err != nil {
+		ctxlog.Error(ctx, err, "Checking for /tmp/operator-sdk-ready failed")
+		os.Exit(1)
+	}
+	defer r.Unset()
+
 	// Become the leader before proceeding
 	err = leader.Become(ctx, "build-operator-lock")
 	if err != nil {
@@ -124,7 +134,7 @@ func main() {
 	}
 
 	c := buildconfig.NewDefaultConfig()
-	if err := c.SetConfigTimeOutFromEnv(); err != nil {
+	if err := c.SetConfigFromEnv(); err != nil {
 		ctxlog.Error(ctx, err, "")
 		os.Exit(1)
 	}
@@ -137,6 +147,7 @@ func main() {
 
 	// Add the Metrics Service
 	addMetrics(ctx, cfg, namespace)
+	buildMetrics.InitPrometheus(c)
 
 	prometheus.InitPrometheus(c)
 

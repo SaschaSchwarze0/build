@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: build-operator
+  namespace: build-operator
 spec:
   replicas: 1
   selector:
@@ -17,10 +18,6 @@ spec:
         - name: build-operator
           # Replace this with the built image name
           image: REPLACE_IMAGE
-          args:
-            - /bin/sh
-            - -c
-            - touch /tmp/build-operator-healthy
           command:
           - build-operator
           imagePullPolicy: Always
@@ -38,14 +35,14 @@ spec:
           livenessProbe:
             exec:
               command:
-                - cat
-                - /tmp/build-operator-healthy
+                - stat
+                - /tmp/operator-sdk-ready
             initialDelaySeconds: 5
             periodSeconds: 10
           readinessProbe:
             exec:
               command:
-                - cat
-                - /tmp/build-operator-healthy
+                - stat
+                - /tmp/operator-sdk-ready
             initialDelaySeconds: 5
             periodSeconds: 10
