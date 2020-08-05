@@ -124,7 +124,9 @@ crds:
 	@hack/crd.sh install
 
 local: crds build
+	CLUSTER_NAME=local \
 	OPERATOR_NAME=build-operator \
+	POD_NAME=local \
 	operator-sdk run --local --operator-flags="$(ZAP_FLAGS)"
 
 clean:

@@ -26,8 +26,9 @@ import (
 	sdkVersion "github.com/operator-framework/operator-sdk/version"
 	"github.com/redhat-developer/build/pkg/apis"
 	"github.com/redhat-developer/build/pkg/controller"
-	"github.com/redhat-developer/build/pkg/monitoring/prometheus"
 	buildMetrics "github.com/redhat-developer/build/pkg/metrics"
+	"github.com/redhat-developer/build/pkg/monitoring/newrelic"
+	"github.com/redhat-developer/build/pkg/monitoring/prometheus"
 	"github.com/redhat-developer/build/version"
 	"github.com/spf13/pflag"
 	v1 "k8s.io/api/core/v1"
@@ -149,6 +150,10 @@ func main() {
 	addMetrics(ctx, cfg, namespace)
 	buildMetrics.InitPrometheus(c)
 
+	if err := newrelic.InitNewRelic(ctx, c); err != nil {
+		ctxlog.Error(ctx, err, "Failed to initialze New Relic monitoring")
+		os.Exit(1)
+	}
 	prometheus.InitPrometheus(c)
 
 	ctxlog.Info(ctx, "Starting the Cmd.")

@@ -20,6 +20,12 @@ const (
 	// KANIKO_CONTAINER_IMAGE="gcr.io/kaniko-project/executor:v0.24.0"
 	kanikoImageEnvVar = "KANIKO_CONTAINER_IMAGE"
 
+	// environment variables for New Relic
+	newRelicAccountID       = "NEW_RELIC_ACCOUNT_ID"
+	newRelicEventType       = "NEW_RELIC_EVENT_TYPE"
+	newRelicInsightsAPIKey  = "NEW_RELIC_INSIGHTS_API_KEY"
+	newRelicInsightsBaseURL = "NEW_RELIC_INSIGHTS_BASE_URL"
+
 	// environment variable to override the buckets
 	metricBuildRunCompletionDurationBucketsEnvVar = "PROMETHEUS_BR_COMP_DUR_BUCKETS"
 	metricBuildRunEstablishDurationBucketsEnvVar  = "PROMETHEUS_BR_EST_DUR_BUCKETS"
@@ -36,7 +42,15 @@ var (
 type Config struct {
 	CtxTimeOut           time.Duration
 	KanikoContainerImage string
+	NewRelic             NewRelicConfig
 	Prometheus           PrometheusConfig
+}
+
+type NewRelicConfig struct {
+	AccountID       int
+	EventType       string
+	InsightsAPIKey  string
+	InsightsBaseURL string
 }
 
 // PrometheusConfig contains the specific configuration for the
@@ -50,6 +64,12 @@ func NewDefaultConfig() *Config {
 	return &Config{
 		CtxTimeOut:           contextTimeout,
 		KanikoContainerImage: kanikoDefaultImage,
+		NewRelic: NewRelicConfig{
+			AccountID:       0,
+			EventType:       "BuildRun",
+			InsightsAPIKey:  "",
+			InsightsBaseURL: "",
+		},
 		Prometheus: PrometheusConfig{
 			BuildRunCompletionDurationBuckets: metricBuildRunCompletionDurationBuckets,
 			BuildRunEstablishDurationBuckets:  metricBuildRunEstablishDurationBuckets,
@@ -72,6 +92,23 @@ func (c *Config) SetConfigFromEnv() error {
 	if kanikoImage != "" {
 		c.KanikoContainerImage = kanikoImage
 	}
+
+	newRelicAccountIDEnvVarValue := os.Getenv(newRelicAccountID)
+	if newRelicAccountIDEnvVarValue != "" {
+		newRelicAccountID, err := strconv.Atoi(newRelicAccountIDEnvVarValue)
+		if err != nil {
+			return err
+		}
+		c.NewRelic.AccountID = newRelicAccountID
+	}
+
+	newRelicEventTypeEnvVarValue := os.Getenv(newRelicEventType)
+	if newRelicEventTypeEnvVarValue != "" {
+		c.NewRelic.EventType = newRelicEventTypeEnvVarValue
+	}
+
+	c.NewRelic.InsightsAPIKey = os.Getenv(newRelicInsightsAPIKey)
+	c.NewRelic.InsightsBaseURL = os.Getenv(newRelicInsightsBaseURL)
 
 	buildRunCompletionDurationBucketsEnvVarValue := os.Getenv(metricBuildRunCompletionDurationBucketsEnvVar)
 	if buildRunCompletionDurationBucketsEnvVarValue != "" {

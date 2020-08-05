@@ -9,8 +9,8 @@ import (
 	buildv1alpha1 "github.com/redhat-developer/build/pkg/apis/build/v1alpha1"
 	"github.com/redhat-developer/build/pkg/config"
 	"github.com/redhat-developer/build/pkg/ctxlog"
-	"github.com/redhat-developer/build/pkg/monitoring"
 	buildmetrics "github.com/redhat-developer/build/pkg/metrics"
+	"github.com/redhat-developer/build/pkg/monitoring"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -195,12 +195,12 @@ func (r *ReconcileBuildRun) Reconcile(request reconcile.Request) (reconcile.Resu
 	build := &buildv1alpha1.Build{}
 	err = r.client.Get(ctx, types.NamespacedName{Name: buildRun.Spec.BuildRef.Name, Namespace: buildRun.Namespace}, build)
 	if err != nil {
-		updateErr := r.updateBuildRunErrorStatus(ctx, buildRun, err.Error())
+		updateErr := r.updateBuildRunErrorStatus(ctx, buildRun, nil, err.Error())
 		return reconcile.Result{}, handleError("Failed to fetch the Build instance", err, updateErr)
 	}
 	if build.Status.Registered != corev1.ConditionTrue {
 		err := fmt.Errorf("The Build is not registered correctly, registered status: %s, reason: %s", build.Status.Registered, build.Status.Reason)
-		updateErr := r.updateBuildRunErrorStatus(ctx, buildRun, err.Error())
+		updateErr := r.updateBuildRunErrorStatus(ctx, buildRun, nil, err.Error())
 		return reconcile.Result{}, handleError("Build is not ready", err, updateErr)
 	}
 
@@ -228,7 +228,7 @@ func (r *ReconcileBuildRun) Reconcile(request reconcile.Request) (reconcile.Resu
 
 		ctxlog.Info(ctx, "creating TaskRun from BuildRun", namespace, request.Namespace, name, generatedTaskRun.Name, "BuildRun", buildRun.Name)
 		if err = r.client.Create(ctx, generatedTaskRun); err != nil {
-			updateErr := r.updateBuildRunErrorStatus(ctx, buildRun, err.Error())
+			updateErr := r.updateBuildRunErrorStatus(ctx, buildRun, generatedTaskRun, err.Error())
 			return reconcile.Result{}, handleError("Failed to create TaskRun if no TaskRun for that BuildRun exists", err, updateErr)
 		}
 	} else {
@@ -285,13 +285,13 @@ func (r *ReconcileBuildRun) Reconcile(request reconcile.Request) (reconcile.Resu
 			}
 
 			if isEnteringFailedState {
-				monitoring.OnV1Alpha1BuildRunFailed(ctx, buildRun)
+				monitoring.OnV1Alpha1BuildRunFailed(ctx, buildRun, lastTaskRun)
 			}
 			if isEnteringRunningState {
-				monitoring.OnV1Alpha1BuildRunRunning(ctx, buildRun)
+				monitoring.OnV1Alpha1BuildRunRunning(ctx, buildRun, lastTaskRun)
 			}
 			if isEnteringSucceededState {
-				monitoring.OnV1Alpha1BuildRunSucceeded(ctx, buildRun)
+				monitoring.OnV1Alpha1BuildRunSucceeded(ctx, buildRun, lastTaskRun)
 			}
 
 			ctxlog.Info(ctx, "updating buildRun status", namespace, request.Namespace, name, request.Name)
@@ -394,7 +394,7 @@ func (r *ReconcileBuildRun) createTaskRun(ctx context.Context, build *buildv1alp
 	// Choose a service account to use
 	serviceAccount, err := r.retrieveServiceAccount(ctx, build, buildRun)
 	if err != nil {
-		updateErr := r.updateBuildRunErrorStatus(ctx, buildRun, err.Error())
+		updateErr := r.updateBuildRunErrorStatus(ctx, buildRun, nil, err.Error())
 		return nil, handleError("Failed to choose a service account to use", err, updateErr)
 	}
 
@@ -406,7 +406,7 @@ func (r *ReconcileBuildRun) createTaskRun(ctx context.Context, build *buildv1alp
 		if buildStrategy != nil {
 			generatedTaskRun, err = GenerateTaskRun(r.config, build, buildRun, serviceAccount.Name, buildStrategy.Spec.BuildSteps)
 			if err != nil {
-				updateErr := r.updateBuildRunErrorStatus(ctx, buildRun, err.Error())
+				updateErr := r.updateBuildRunErrorStatus(ctx, buildRun, generatedTaskRun, err.Error())
 				return nil, handleError("Failed to generate the taskrun with buildStrategy", err, updateErr)
 			}
 		}
@@ -418,32 +418,32 @@ func (r *ReconcileBuildRun) createTaskRun(ctx context.Context, build *buildv1alp
 		if clusterBuildStrategy != nil {
 			generatedTaskRun, err = GenerateTaskRun(r.config, build, buildRun, serviceAccount.Name, clusterBuildStrategy.Spec.BuildSteps)
 			if err != nil {
-				updateErr := r.updateBuildRunErrorStatus(ctx, buildRun, err.Error())
+				updateErr := r.updateBuildRunErrorStatus(ctx, buildRun, generatedTaskRun, err.Error())
 				return nil, handleError("Failed to generate the taskrun with clusterBuildStrategy", err, updateErr)
 			}
 		}
 	} else {
 		err := fmt.Errorf("unknown strategy %s", string(*build.Spec.StrategyRef.Kind))
-		updateErr := r.updateBuildRunErrorStatus(ctx, buildRun, err.Error())
+		updateErr := r.updateBuildRunErrorStatus(ctx, buildRun, generatedTaskRun, err.Error())
 		return nil, handleError(fmt.Sprintf("Unsupported BuildStrategy Kind: %v", build.Spec.StrategyRef.Kind), err, updateErr)
 	}
 
 	// Set OwnerReference for Build and BuildRun
 	if err := r.setOwnerReferenceFunc(build, buildRun, r.scheme); err != nil {
-		updateErr := r.updateBuildRunErrorStatus(ctx, buildRun, err.Error())
+		updateErr := r.updateBuildRunErrorStatus(ctx, buildRun, generatedTaskRun, err.Error())
 		return nil, handleError("Failed to set OwnerReference for Build and BuildRun", err, updateErr)
 	}
 
 	// Set OwnerReference for BuildRun and TaskRun
 	if err := r.setOwnerReferenceFunc(buildRun, generatedTaskRun, r.scheme); err != nil {
-		updateErr := r.updateBuildRunErrorStatus(ctx, buildRun, err.Error())
+		updateErr := r.updateBuildRunErrorStatus(ctx, buildRun, generatedTaskRun, err.Error())
 		return nil, handleError("Failed to set OwnerReference for BuildRun and TaskRun", err, updateErr)
 	}
 
 	return generatedTaskRun, nil
 }
 
-func (r *ReconcileBuildRun) updateBuildRunErrorStatus(ctx context.Context, buildRun *buildv1alpha1.BuildRun, errorMessage string) error {
+func (r *ReconcileBuildRun) updateBuildRunErrorStatus(ctx context.Context, buildRun *buildv1alpha1.BuildRun, taskRun *v1beta1.TaskRun, errorMessage string) error {
 	buildRun.Status.Succeeded = corev1.ConditionFalse
 	buildRun.Status.Reason = errorMessage
 	now := metav1.Now()
@@ -451,7 +451,7 @@ func (r *ReconcileBuildRun) updateBuildRunErrorStatus(ctx context.Context, build
 	ctxlog.Debug(ctx, "updating buildRun status", namespace, buildRun.Namespace, name, buildRun.Name)
 	updateErr := r.client.Status().Update(ctx, buildRun)
 	if updateErr == nil {
-		monitoring.OnV1Alpha1BuildRunFailed(ctx, buildRun)
+		monitoring.OnV1Alpha1BuildRunFailed(ctx, buildRun, taskRun)
 	}
 	return updateErr
 }

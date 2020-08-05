@@ -9,6 +9,7 @@ import (
 	"github.com/redhat-developer/build/pkg/config"
 	"github.com/redhat-developer/build/pkg/ctxlog"
 	"github.com/redhat-developer/build/pkg/monitoring"
+	tektonv1beta1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
@@ -40,7 +41,7 @@ func (p *prometheusConsumer) V1Alpha1BuildRunCreated(ctx context.Context, buildR
 	}).Inc()
 }
 
-func (p *prometheusConsumer) V1Alpha1BuildRunFailed(ctx context.Context, buildRun *buildv1alpha1.BuildRun) {
+func (p *prometheusConsumer) V1Alpha1BuildRunFailed(ctx context.Context, buildRun *buildv1alpha1.BuildRun, taskRun *tektonv1beta1.TaskRun) {
 	ctx = ctxlog.NewContext(ctx, "prometheus")
 	ctxlog.Debug(ctx, "V1Alpha1BuildRunFailed", "namespace", buildRun.Namespace, "name", buildRun.Name)
 
@@ -51,7 +52,7 @@ func (p *prometheusConsumer) V1Alpha1BuildRunFailed(ctx context.Context, buildRu
 	}).Inc()
 }
 
-func (p *prometheusConsumer) V1Alpha1BuildRunRunning(ctx context.Context, buildRun *buildv1alpha1.BuildRun) {
+func (p *prometheusConsumer) V1Alpha1BuildRunRunning(ctx context.Context, buildRun *buildv1alpha1.BuildRun, taskRun *tektonv1beta1.TaskRun) {
 	ctx = ctxlog.NewContext(ctx, "prometheus")
 	ctxlog.Debug(ctx, "V1Alpha1BuildRunRunning", "namespace", buildRun.Namespace, "name", buildRun.Name)
 
@@ -66,7 +67,7 @@ func (p *prometheusConsumer) V1Alpha1BuildRunRunning(ctx context.Context, buildR
 	}).Observe(duration)
 }
 
-func (p *prometheusConsumer) V1Alpha1BuildRunSucceeded(ctx context.Context, buildRun *buildv1alpha1.BuildRun) {
+func (p *prometheusConsumer) V1Alpha1BuildRunSucceeded(ctx context.Context, buildRun *buildv1alpha1.BuildRun, taskRun *tektonv1beta1.TaskRun) {
 	ctx = ctxlog.NewContext(ctx, "prometheus")
 	ctxlog.Debug(ctx, "V1Alpha1BuildRunSucceeded", "namespace", buildRun.Namespace, "name", buildRun.Name)
 
@@ -130,8 +131,8 @@ func InitPrometheus(config *config.Config) {
 
 		buildRunCreatedToRunning: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Name: "buildrun_created_to_running",
-				Help: "Duration in seconds from the creation of a buildrun to it entering the Running state.",
+				Name:    "buildrun_created_to_running",
+				Help:    "Duration in seconds from the creation of a buildrun to it entering the Running state.",
 				Buckets: prometheus.LinearBuckets(0, 1, 11),
 			},
 			[]string{
@@ -143,8 +144,8 @@ func InitPrometheus(config *config.Config) {
 
 		buildRunCreatedToSucceeded: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Name: "buildrun_created_to_succeeded",
-				Help: "Duration in seconds from the creation of a buildrun to it ending successful.",
+				Name:    "buildrun_created_to_succeeded",
+				Help:    "Duration in seconds from the creation of a buildrun to it ending successful.",
 				Buckets: prometheus.ExponentialBuckets(10, 1.5, 14),
 			},
 			[]string{
