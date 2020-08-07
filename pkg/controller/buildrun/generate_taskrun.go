@@ -153,6 +153,12 @@ func GenerateTaskSpec(
 			}
 
 		}
+
+		if strings.HasPrefix(containerValue.Name, "insights-") {
+			generatedTaskSpec.Results = append(generatedTaskSpec.Results, v1beta1.TaskResult{
+				Name: containerValue.Name,
+			})
+		}
 	}
 
 	generatedTaskSpec.Volumes = vols

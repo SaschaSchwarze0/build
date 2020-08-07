@@ -32,6 +32,7 @@ spec:
         - --context=/workspace/source/$(build.source.contextDir)
         - --destination=$(build.output.image)
         - --snapshotMode=redo
+        - --oci-layout-path=/workspace/output/image
       resources:
         limits:
           cpu: 500m
@@ -39,3 +40,17 @@ spec:
         requests:
           cpu: 250m
           memory: 65Mi
+    - name: insights-container-size
+      image: stedolan/jq
+      resources:
+        limits:
+          cpu: 100m
+          memory: 128Mi
+        requests:
+          cpu: 100m
+          memory: 128Mi
+      command:
+        - /bin/bash
+      args:
+        - -c
+        - "jq '.manifests[0].size' < /workspace/output/image/index.json > /tekton/results/insights-container-size"

@@ -63,36 +63,60 @@ func (n *newrelicConsumer) createEventData(buildRun *buildv1alpha1.BuildRun, tas
 		nrEvent["completionTime"] = buildRun.Status.CompletionTime.Unix()
 	}
 
-	if taskRun.Status.PodName != "" {
-		nrEvent["taskRunPod"] = taskRun.Status.PodName
-	}
+	if taskRun != nil {
+		if taskRun.Status.PodName != "" {
+			nrEvent["taskRunPod"] = taskRun.Status.PodName
+		}
 
-	// Add information about completed steps
-	if taskRun.Status.Steps != nil {
-		for _, step := range taskRun.Status.Steps {
-			if step.Terminated != nil {
-				stepName := createNewRelicKey(step.Name)
+		// Add information about completed steps
+		if taskRun.Status.Steps != nil {
+			for _, step := range taskRun.Status.Steps {
+				if step.Terminated != nil {
+					stepName := createNewRelicKey(step.Name)
 
-				nrEvent[stepName+"Status"] = step.Terminated.ExitCode
-				nrEvent[stepName+"StartTime"] = step.Terminated.StartedAt.Unix()
-				nrEvent[stepName+"CompletionTime"] = step.Terminated.FinishedAt.Unix()
+					nrEvent[stepName+"Status"] = step.Terminated.ExitCode
+					nrEvent[stepName+"StartTime"] = step.Terminated.StartedAt.Unix()
+					nrEvent[stepName+"CompletionTime"] = step.Terminated.FinishedAt.Unix()
+				}
 			}
 		}
-	}
 
-	// the failed step can be found in the conditions, this is a little uggly
-	condition := taskRun.Status.GetCondition(knativeapis.ConditionSucceeded)
-	if condition != nil && condition.Status == corev1.ConditionFalse && failedStepMessageRegex.MatchString(condition.Message) {
-		groups := failedStepMessageRegex.FindStringSubmatch(condition.Message)
+		// the failed step can be found in the conditions, this is a little uggly
+		condition := taskRun.Status.GetCondition(knativeapis.ConditionSucceeded)
+		if condition != nil && condition.Status == corev1.ConditionFalse && failedStepMessageRegex.MatchString(condition.Message) {
+			groups := failedStepMessageRegex.FindStringSubmatch(condition.Message)
 
-		stepName := createNewRelicKey(groups[1])
-		exitCode, err := strconv.Atoi(groups[2])
-		if err != nil {
-			return nil, err
+			stepName := createNewRelicKey(groups[1])
+			exitCode, err := strconv.Atoi(groups[2])
+			if err != nil {
+				return nil, err
+			}
+
+			nrEvent[stepName+"Status"] = exitCode
+			nrEvent["failedContainer"] = removeRandomSuffix(groups[1])
 		}
 
-		nrEvent[stepName+"Status"] = exitCode
-		nrEvent["failedContainer"] = removeRandomSuffix(groups[1])
+		// look for insights from the task run result
+		for _, taskRunResult := range taskRun.Status.TaskRunResults {
+			if strings.HasPrefix(taskRunResult.Name, "insights-") {
+				key := taskRunResultNameToNewRelicKey(taskRunResult.Name)
+				value := strings.TrimSpace(taskRunResult.Value)
+
+				intValue, err := strconv.Atoi(value)
+				if err == nil {
+					nrEvent[key] = intValue
+					continue
+				}
+
+				floatValue, err := strconv.ParseFloat(value, 64)
+				if err == nil {
+					nrEvent[key] = floatValue
+					continue
+				}
+
+				nrEvent[key] = value
+			}
+		}
 	}
 
 	return json.Marshal(nrEvent)
@@ -190,4 +214,19 @@ func createNewRelicKey(stepName string) string {
 	}
 
 	return "container" + strings.Join(stepNameParts, "")
+}
+
+func taskRunResultNameToNewRelicKey(taskRunResultName string) string {
+	taskRunResultNameParts := strings.Split(string(taskRunResultName[9:]), "-")
+	for i, taskRunResultNamePart := range taskRunResultNameParts {
+		if i == 0 {
+			taskRunResultNameParts[i] = strings.ToLower(taskRunResultNamePart)
+		} else if len(taskRunResultNamePart) == 1 {
+			taskRunResultNameParts[i] = strings.ToUpper(taskRunResultNamePart)
+		} else if len(taskRunResultNamePart) > 1 {
+			taskRunResultNameParts[i] = strings.ToUpper(string(taskRunResultNamePart[0])) + strings.ToLower(string(taskRunResultNamePart[1:]))
+		}
+	}
+
+	return strings.Join(taskRunResultNameParts, "")
 }
