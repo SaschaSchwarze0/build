@@ -70,6 +70,10 @@ build: $(OPERATOR)
 $(OPERATOR): vendor
 	go build $(GO_FLAGS) -o $(OPERATOR) cmd/manager/main.go
 
+.PHONY: build-plain
+build-plain: 
+	go build $(GO_FLAGS) -o $(OPERATOR) cmd/manager/main.go
+
 install-ginkgo:
 	go get -u github.com/onsi/ginkgo/ginkgo
 	go get -u github.com/onsi/gomega/...
@@ -127,6 +131,10 @@ local: crds build
 	CLUSTER_NAME=local \
 	OPERATOR_NAME=build-operator \
 	POD_NAME=local \
+	operator-sdk run --local --operator-flags="$(ZAP_FLAGS)"
+
+local-plain: build-plain
+	OPERATOR_NAME=build-operator \
 	operator-sdk run --local --operator-flags="$(ZAP_FLAGS)"
 
 clean:
