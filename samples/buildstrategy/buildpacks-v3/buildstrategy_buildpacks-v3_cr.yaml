@@ -112,3 +112,24 @@ spec:
           mountPath: /cache
         - name: layers-dir
           mountPath: /layers
+    - name: insights
+      image: stedolan/jq
+      resources:
+        limits:
+          cpu: 100m
+          memory: 128Mi
+        requests:
+          cpu: 100m
+          memory: 128Mi
+      volumeMounts:
+        - name: layers-dir
+          mountPath: /layers
+      command:
+        - /bin/bash
+      args:
+        - -c
+        - >-
+            echo "{\"buildpackGroups\":\"" > /tmp/insights && 
+            cat /layers/group.toml | grep "id =" | sed -En "s/  id = \"(.*)\"/\1/p" | tr -d "\r" | tr "\n" "," >> /tmp/insights &&
+            echo "\"}" >> /tmp/insights &&
+            cat /tmp/insights | tr -d "\n" > /tekton/results/insights

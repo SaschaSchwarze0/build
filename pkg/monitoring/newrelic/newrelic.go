@@ -30,7 +30,7 @@ type newrelicConsumer struct {
 	eventType string
 }
 
-func (n *newrelicConsumer) createEventData(buildRun *buildv1alpha1.BuildRun, taskRun *tektonv1beta1.TaskRun) ([]byte, error) {
+func (n *newrelicConsumer) createEventData(ctx context.Context, buildRun *buildv1alpha1.BuildRun, taskRun *tektonv1beta1.TaskRun) ([]byte, error) {
 	nrEvent := make(map[string]interface{})
 
 	nrEvent["eventType"] = n.eventType
@@ -63,7 +63,13 @@ func (n *newrelicConsumer) createEventData(buildRun *buildv1alpha1.BuildRun, tas
 		nrEvent["completionTime"] = buildRun.Status.CompletionTime.Unix()
 	}
 
+	if buildRun.Status.LatestTaskRunRef != nil {
+		nrEvent["taskRunName"] = buildRun.Status.LatestTaskRunRef
+	}
+
 	if taskRun != nil {
+		nrEvent["taskRunCreationTime"] = taskRun.CreationTimestamp.Unix()
+
 		if taskRun.Status.PodName != "" {
 			nrEvent["taskRunPod"] = taskRun.Status.PodName
 		}
@@ -96,25 +102,22 @@ func (n *newrelicConsumer) createEventData(buildRun *buildv1alpha1.BuildRun, tas
 			nrEvent["failedContainer"] = removeRandomSuffix(groups[1])
 		}
 
+		// look for insights from the resource results
+		for _, resourceResult := range taskRun.Status.ResourcesResult {
+			if resourceResult.Key == "commit" {
+				nrEvent["commit"] = resourceResult.Value
+			} else if resourceResult.Key == "digest" {
+				nrEvent["containerDigest"] = resourceResult.Value
+			}
+		}
+
 		// look for insights from the task run result
 		for _, taskRunResult := range taskRun.Status.TaskRunResults {
-			if strings.HasPrefix(taskRunResult.Name, "insights-") {
-				key := taskRunResultNameToNewRelicKey(taskRunResult.Name)
-				value := strings.TrimSpace(taskRunResult.Value)
-
-				intValue, err := strconv.Atoi(value)
-				if err == nil {
-					nrEvent[key] = intValue
-					continue
+			if taskRunResult.Name == "insights" {
+				// the value is a JSON string
+				if err := json.Unmarshal([]byte(taskRunResult.Value), &nrEvent); err != nil {
+					ctxlog.Error(ctx, err, "Value is not parsable", "value", taskRunResult.Value)
 				}
-
-				floatValue, err := strconv.ParseFloat(value, 64)
-				if err == nil {
-					nrEvent[key] = floatValue
-					continue
-				}
-
-				nrEvent[key] = value
 			}
 		}
 	}
@@ -129,15 +132,19 @@ func (n *newrelicConsumer) V1Alpha1BuildRunFailed(ctx context.Context, buildRun 
 	ctx = ctxlog.NewContext(ctx, "newrelic")
 	ctxlog.Debug(ctx, "V1Alpha1BuildRunFailed", "namespace", buildRun.Namespace, "name", buildRun.Name)
 
-	event, err := n.createEventData(buildRun, taskRun)
+	event, err := n.createEventData(ctx, buildRun, taskRun)
 	if err != nil {
 		ctxlog.Error(ctx, err, "Event data cannot be created.")
 		return
 	}
 
-	if err := n.client.EnqueueEvent(ctx, event); err != nil {
-		ctxlog.Error(ctx, err, "Event cannot be queued.")
-	}
+	ctxlog.Info(ctx, string(event))
+
+	/*
+		if err := n.client.EnqueueEvent(ctx, event); err != nil {
+			ctxlog.Error(ctx, err, "Event cannot be queued.")
+		}
+	*/
 }
 
 func (n *newrelicConsumer) V1Alpha1BuildRunRunning(ctx context.Context, buildRun *buildv1alpha1.BuildRun, taskRun *tektonv1beta1.TaskRun) {
@@ -147,11 +154,13 @@ func (n *newrelicConsumer) V1Alpha1BuildRunSucceeded(ctx context.Context, buildR
 	ctx = ctxlog.NewContext(ctx, "newrelic")
 	ctxlog.Debug(ctx, "V1Alpha1BuildRunSucceeded", "namespace", buildRun.Namespace, "name", buildRun.Name)
 
-	event, err := n.createEventData(buildRun, taskRun)
+	event, err := n.createEventData(ctx, buildRun, taskRun)
 	if err != nil {
 		ctxlog.Error(ctx, err, "Event data cannot be created.")
 		return
 	}
+
+	ctxlog.Info(ctx, "New Relic event", "event", string(event))
 
 	if err := n.client.EnqueueEvent(ctx, event); err != nil {
 		ctxlog.Error(ctx, err, "Event cannot be queued.")
@@ -214,19 +223,4 @@ func createNewRelicKey(stepName string) string {
 	}
 
 	return "container" + strings.Join(stepNameParts, "")
-}
-
-func taskRunResultNameToNewRelicKey(taskRunResultName string) string {
-	taskRunResultNameParts := strings.Split(string(taskRunResultName[9:]), "-")
-	for i, taskRunResultNamePart := range taskRunResultNameParts {
-		if i == 0 {
-			taskRunResultNameParts[i] = strings.ToLower(taskRunResultNamePart)
-		} else if len(taskRunResultNamePart) == 1 {
-			taskRunResultNameParts[i] = strings.ToUpper(taskRunResultNamePart)
-		} else if len(taskRunResultNamePart) > 1 {
-			taskRunResultNameParts[i] = strings.ToUpper(string(taskRunResultNamePart[0])) + strings.ToLower(string(taskRunResultNamePart[1:]))
-		}
-	}
-
-	return strings.Join(taskRunResultNameParts, "")
 }

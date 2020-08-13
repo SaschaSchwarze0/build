@@ -40,7 +40,7 @@ spec:
         requests:
           cpu: 250m
           memory: 65Mi
-    - name: insights-container-size
+    - name: insights
       image: stedolan/jq
       resources:
         limits:
@@ -53,4 +53,8 @@ spec:
         - /bin/bash
       args:
         - -c
-        - "jq '.manifests[0].size' < /workspace/output/image/index.json > /tekton/results/insights-container-size"
+        - >-
+            echo "{\"containerSize\":" > /tmp/insights && 
+            jq '.manifests[0].size' < /workspace/output/image/index.json >> /tmp/insights &&
+            echo "}" >> /tmp/insights &&
+            cat /tmp/insights | tr -d "\n" > /tekton/results/insights
