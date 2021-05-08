@@ -132,3 +132,24 @@ spec:
         - name: varlibcontainers
           mountPath: /var/lib/containers
 `
+
+// BuildStrategyWithParameters is a strategy that uses a
+// sleep command with a value for its spec.parameters
+const BuildStrategyWithParameters = `
+apiVersion: build.dev/v1alpha1
+kind: BuildStrategy
+metadata:
+  name: strategy-with-param
+spec:
+  parameters:
+  - name: sleep-time
+    description: "time in seconds for sleeping"
+    default: 1
+  buildSteps:
+  - name: sleep30
+    image: alpine:latest
+    command:
+    - sleep
+    args:
+    - $(params.sleep-time)
+`

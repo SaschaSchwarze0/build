@@ -7,6 +7,7 @@ package integration_test
 import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 
 	"github.com/shipwright-io/build/pkg/apis/build/v1alpha1"
 	"github.com/shipwright-io/build/test"
@@ -83,6 +84,94 @@ var _ = Describe("Integration tests ClusterBuildStrategies and TaskRuns", func()
 			Expect(containsKey).To(BeFalse())
 			_, containsKey = taskRun.Annotations["kubectl.kubernetes.io/last-applied-configuration"]
 			Expect(containsKey).To(BeFalse())
+		})
+	})
+
+	Context("clusterbuildstrategy with defined parameters", func() {
+
+		var (
+			cbsObjectWithParam *v1alpha1.ClusterBuildStrategy
+		)
+
+		BeforeEach(func() {
+			cbsObjectWithParam, err = tb.Catalog.LoadCBSWithName("strategy-with-param"+tb.Namespace, []byte(test.ClusterBuildStrategyWithParameters))
+			Expect(err).To(BeNil())
+
+			err = tb.CreateClusterBuildStrategy(cbsObjectWithParam)
+			Expect(err).To(BeNil())
+		})
+
+		AfterEach(func() {
+
+			err := tb.DeleteClusterBuildStrategy(cbsObjectWithParam.Name)
+			Expect(err).To(BeNil())
+		})
+
+		var constructBuildObjectAndWait = func(b *v1alpha1.Build) {
+			// Create the Build object in-cluster
+			Expect(tb.CreateBuild(b)).To(BeNil())
+
+			// Wait until the Build object is validated
+			_, err = tb.GetBuildTillValidation(b.Name)
+			Expect(err).To(BeNil())
+
+		}
+
+		It("fails the Build due to the definition of an undefined param in the clusterbuildstrategy", func() {
+			buildObject, err = tb.Catalog.LoadBuildWithNameAndStrategy(
+				BUILD+tb.Namespace,
+				cbsObjectWithParam.Name,
+				[]byte(test.BuildWithUndefinedParamAndCBS),
+			)
+			Expect(err).To(BeNil())
+
+			// Create the Build object in-cluster
+			Expect(tb.CreateBuild(buildObject)).To(BeNil())
+
+			// Wait until the Build object is validated
+			buildObject, err = tb.GetBuildTillValidation(buildObject.Name)
+			Expect(err).To(BeNil())
+
+			Expect(buildObject.Status.Reason).To(Equal(v1alpha1.UndefinedParameter))
+			Expect(buildObject.Status.Message).To(ContainSubstring("parameter not defined in the strategies"))
+		})
+
+		It("uses sleep-time param if specified in the Build from cbs", func() {
+			buildObject, err = tb.Catalog.LoadBuildWithNameAndStrategy(
+				BUILD+tb.Namespace,
+				cbsObjectWithParam.Name,
+				[]byte(test.BuildWithSleepTimeParamAndCBS),
+			)
+			Expect(err).To(BeNil())
+
+			constructBuildObjectAndWait(buildObject)
+
+			// Create a minimal BuildRun
+			buildRunObject, err = tb.Catalog.LoadBRWithNameAndRef(
+				BUILDRUN+tb.Namespace,
+				BUILD+tb.Namespace,
+				[]byte(test.MinimalBuildRun),
+			)
+			Expect(err).To(BeNil())
+
+			// Create the BuildRun object in-cluster
+			Expect(tb.CreateBR(buildRunObject)).To(BeNil())
+
+			// Wait until the BuildRun is registered
+			_, err = tb.GetBRTillStartTime(buildRunObject.Name)
+			Expect(err).To(BeNil())
+
+			taskRun, err := tb.GetTaskRunFromBuildRun(buildRunObject.Name)
+			Expect(err).To(BeNil())
+
+			Expect(taskRun.Spec.Params).To(ContainElement(v1beta1.Param{
+				Name: "sleep-time",
+				Value: v1beta1.ArrayOrString{
+					Type:      v1beta1.ParamTypeString,
+					StringVal: "30",
+				},
+			}))
+
 		})
 	})
 })
