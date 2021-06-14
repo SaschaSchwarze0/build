@@ -153,3 +153,45 @@ spec:
     args:
     - $(params.sleep-time)
 `
+
+// BuildStrategyWithParameterNoDefault is a strategy that
+// uses a sleep command with a value for its spec.parameters
+// that has no default
+const BuildStrategyWithParameterNoDefault = `
+apiVersion: build.dev/v1alpha1
+kind: BuildStrategy
+metadata:
+  name: strategy-with-param
+spec:
+  parameters:
+    - name: sleep-time
+      description: "time in seconds for sleeping"
+    buildSteps:
+    - name: sleep30
+      image: alpine:latest
+      command:
+      - sleep
+      args:
+      - $(params.sleep-time)
+`
+
+// BuildStrategyWithParameters is a strategy that uses a
+// sleep command with a value for its spec.parameters
+const BuildStrategyWithParameterEmptyDefault = `
+apiVersion: build.dev/v1alpha1
+kind: BuildStrategy
+metadata:
+  name: strategy-with-param
+spec:
+  parameters:
+  - name: echo-string
+    description: "String to echo"
+    default: ""
+  buildSteps:
+  - name: echo-string
+    image: alpine:latest
+    command:
+    - echo
+    args:
+    - $(params.echo-string)
+`

@@ -38,7 +38,7 @@ type Parameter struct {
 
 	// Reasonable default value for the parameter
 	// +optional
-	Default string `json:"default,omitempty"`
+	Default *string `json:"default"`
 }
 
 // BuildStep defines a partial step that needs to run in container for

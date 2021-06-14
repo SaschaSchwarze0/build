@@ -143,31 +143,21 @@ func GenerateTaskSpec(
 	// define results, steps and volumes for sources
 	AmendTaskSpecWithSources(cfg, &generatedTaskSpec, build)
 
-	var parameterDefault *v1beta1.ArrayOrString
-
 	// Add the strategy defined parameters into the Task spec
 	for _, p := range strategyParams {
-		// verify if the paramSpec Default requires a default
-		// value or not
-		if p.Default == "" {
-			parameterDefault = &v1beta1.ArrayOrString{
-				Type: v1beta1.ParamTypeString,
-			}
-		} else {
-			parameterDefault = &v1beta1.ArrayOrString{
+		param := v1beta1.ParamSpec{
+			Name:        p.Name,
+			Description: p.Description,
+		}
+
+		if p.Default != nil {
+			param.Default = &v1beta1.ArrayOrString{
 				Type:      v1beta1.ParamTypeString,
-				StringVal: p.Default,
+				StringVal: *p.Default,
 			}
 		}
-		generatedTaskSpec.Params = append(
-			generatedTaskSpec.Params,
-			v1beta1.ParamSpec{
-				Name:        p.Name,
-				Description: p.Description,
-				Default:     parameterDefault,
-			},
-		)
 
+		generatedTaskSpec.Params = append(generatedTaskSpec.Params, param)
 	}
 
 	// define the steps coming from the build strategy
@@ -386,6 +376,25 @@ func GenerateTaskRun(
 	// with a custom error
 	if len(undesiredParams) > 0 {
 		return nil, fmt.Errorf("restricted parameters in use: %s", strings.Join(undesiredParams, ","))
+	}
+
+	// check if there are parameters missing in the Build and BuildRun
+	missingParams := []string{}
+STRATEGY_PARAM_LOOP:
+	for _, strategyParam := range strategy.GetParameters() {
+		if strategyParam.Default == nil {
+			for _, userParam := range buildUserParams {
+				if strategyParam.Name == userParam.Name {
+					continue STRATEGY_PARAM_LOOP
+				}
+			}
+
+			missingParams = append(missingParams, strategyParam.Name)
+		}
+	}
+
+	if len(missingParams) > 0 {
+		return nil, fmt.Errorf("value for parameters missing: %s", strings.Join(missingParams, ","))
 	}
 
 	return expectedTaskRun, nil
