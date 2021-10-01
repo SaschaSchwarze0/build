@@ -5,11 +5,17 @@ on:
 
   schedule:
   - cron: '0 5 * * *' # 5 AM UTC = Midnight EST
+  push:
+    branches: 
+    - sascha-nightly-updates
 
 jobs:
   nightly:
-    if: ${{ github.repository == 'shipwright-io/build' }}
+    #if: ${{ github.repository == 'shipwright-io/build' }}
     runs-on: ubuntu-latest
+    env:
+      IMAGE_HOST: registry.saschaschwarze.de
+      IMAGE_NAMESPACE: shipwright-test
     steps:
     - uses: actions/checkout@v2
 
@@ -29,8 +35,6 @@ jobs:
       env:
         REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
         REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-        IMAGE_HOST: quay.io
-        IMAGE: shipwright/shipwright-operator
         TAG: "nightly-${{ steps.date.outputs.date }}"
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
@@ -41,3 +45,13 @@ jobs:
 
         mv release-debug.yaml nightly-${{ steps.date.outputs.date }}-debug.yaml
         gh release upload nightly nightly-${{ steps.date.outputs.date }}-debug.yaml
+    - name: Update latest tag of supporting images
+      run: |
+        crane copy "${IMAGE_HOST}/${IMAGE_NAMESPACE}/bundle:${{ steps.date.outputs.date }}" "${IMAGE_HOST}/${IMAGE_NAMESPACE}/bundle:latest"
+        crane copy "${IMAGE_HOST}/${IMAGE_NAMESPACE}/git:${{ steps.date.outputs.date }}" "${IMAGE_HOST}/${IMAGE_NAMESPACE}/git:latest"
+        crane copy "${IMAGE_HOST}/${IMAGE_NAMESPACE}/mutate-image:${{ steps.date.outputs.date }}" "${IMAGE_HOST}/${IMAGE_NAMESPACE}/mutate-image:latest"
+
+    - name: Package sample build strategies
+      run: |
+        ko resolve samples/buildstrategies > nightly-${{ steps.date.outputs.date }}-strategies.yaml
+        gh release upload nightly nightly-${{ steps.date.outputs.date }}-strategies.yaml
