@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -15,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	shpgit "github.com/shipwright-io/build/pkg/git"
 	"github.com/shipwright-io/build/pkg/util"
@@ -152,7 +154,101 @@ func Execute(ctx context.Context) error {
 	// Create clean version of the URL that should be safe to be displayed in logs
 	displayURL = cleanURL()
 
-	return runGitClone(ctx)
+	// check if there is any content in the target, if so move it away
+	// this is necessary to support build strategy steps that use a sub-directory of the
+	// source directory as workingDir, most prominently $(params.shp-source-context)
+	time.Sleep(time.Second)
+	entries, err := os.ReadDir(flagValues.target)
+	if err != nil {
+		return err
+	}
+	cloneToTempDir := len(entries) > 0
+	target := flagValues.target
+	if cloneToTempDir {
+		// this is not nice, pass target to gitClone
+		flagValues.target = filepath.Join(flagValues.target, ".tmp")
+	}
+
+	/*
+		time.Sleep(time.Second)
+		entries, err := os.ReadDir(flagValues.target)
+		if err != nil {
+			return err
+		}
+		entriesToMoveBack := []string{}
+		existingEntriesBackupDir := ""
+		for _, entry := range entries {
+			if len(entriesToMoveBack) == 0 {
+				if existingEntriesBackupDir, err = os.MkdirTemp("/workspace", "backup-existing"); err != nil {
+					return err
+				}
+			}
+			log.Printf("Backing up existing entry %s\n", entry.Name())
+			if err = os.Rename(filepath.Join(flagValues.target, entry.Name()), filepath.Join(existingEntriesBackupDir, entry.Name())); err != nil {
+				return err
+			}
+			entriesToMoveBack = append(entriesToMoveBack, entry.Name())
+		}
+	*/
+
+	if err = runGitClone(ctx); err != nil {
+		return err
+	}
+
+	/*
+		for _, entryToMoveBack := range entriesToMoveBack {
+			target := filepath.Join(flagValues.target, entryToMoveBack)
+			if _, err = os.Stat(target); errors.Is(err, os.ErrNotExist) {
+				log.Printf("Restoring existing entry %s\n", entryToMoveBack)
+				if err = os.Rename(filepath.Join(existingEntriesBackupDir, entryToMoveBack), target); err != nil {
+					return err
+				}
+			}
+		}
+	*/
+
+	if cloneToTempDir {
+		clonedEntries, err := os.ReadDir(flagValues.target)
+		if err != nil {
+			return err
+		}
+		for _, entry := range clonedEntries {
+			existingEntryPath := filepath.Join(target, entry.Name())
+			existingEntry, err := os.Stat(existingEntryPath)
+			switch {
+			case errors.Is(err, os.ErrNotExist):
+				if err = os.Rename(filepath.Join(flagValues.target, entry.Name()), filepath.Join(target, entry.Name())); err != nil {
+					return err
+				}
+
+			case err != nil:
+				return err
+
+			case existingEntry.IsDir() && entry.IsDir():
+				/*if err = cp.Copy(filepath.Join(flagValues.target, entry.Name()), existingEntryPath, cp.Options{
+					PreserveOwner: true,
+					PreserveTimes: true,
+				}); err != nil {
+					return err
+				}*/
+				continue
+
+			default:
+				if err = os.RemoveAll(existingEntryPath); err != nil {
+					return err
+				}
+				if err = os.Rename(filepath.Join(flagValues.target, entry.Name()), filepath.Join(target, entry.Name())); err != nil {
+					return err
+				}
+			}
+		}
+
+		if err = os.RemoveAll(flagValues.target); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func runGitClone(ctx context.Context) error {

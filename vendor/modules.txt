@@ -398,6 +398,9 @@ github.com/opencontainers/go-digest
 ## explicit; go 1.18
 github.com/opencontainers/image-spec/specs-go
 github.com/opencontainers/image-spec/specs-go/v1
+# github.com/otiai10/copy v1.14.0
+## explicit; go 1.18
+github.com/otiai10/copy
 # github.com/pjbgf/sha1cd v0.3.0
 ## explicit; go 1.19
 github.com/pjbgf/sha1cd
@@ -1121,7 +1124,6 @@ knative.dev/pkg/tracker
 knative.dev/pkg/webhook/resourcesemantics
 # sigs.k8s.io/controller-runtime v0.18.5
 ## explicit; go 1.22.0
-sigs.k8s.io/controller-runtime/pkg/builder
 sigs.k8s.io/controller-runtime/pkg/cache
 sigs.k8s.io/controller-runtime/pkg/cache/internal
 sigs.k8s.io/controller-runtime/pkg/certwatcher
@@ -1133,7 +1135,6 @@ sigs.k8s.io/controller-runtime/pkg/cluster
 sigs.k8s.io/controller-runtime/pkg/config
 sigs.k8s.io/controller-runtime/pkg/controller
 sigs.k8s.io/controller-runtime/pkg/controller/controllerutil
-sigs.k8s.io/controller-runtime/pkg/conversion
 sigs.k8s.io/controller-runtime/pkg/event
 sigs.k8s.io/controller-runtime/pkg/handler
 sigs.k8s.io/controller-runtime/pkg/healthz
@@ -1160,7 +1161,6 @@ sigs.k8s.io/controller-runtime/pkg/scheme
 sigs.k8s.io/controller-runtime/pkg/source
 sigs.k8s.io/controller-runtime/pkg/webhook
 sigs.k8s.io/controller-runtime/pkg/webhook/admission
-sigs.k8s.io/controller-runtime/pkg/webhook/conversion
 sigs.k8s.io/controller-runtime/pkg/webhook/internal/metrics
 # sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd
 ## explicit; go 1.18

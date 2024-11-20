@@ -243,6 +243,15 @@ func GenerateTaskRun(
 		}
 	}
 
+	if strategy.GetSecurityContext() != nil {
+		expectedTaskRun.Spec.PodTemplate = &pod.Template{
+			SecurityContext: &corev1.PodSecurityContext{
+				RunAsUser:  &strategy.GetSecurityContext().RunAsUser,
+				RunAsGroup: &strategy.GetSecurityContext().RunAsGroup,
+			},
+		}
+	}
+
 	// assign the annotations from the build strategy, filter out those that should not be propagated
 	taskRunAnnotations := make(map[string]string)
 	for key, value := range strategy.GetAnnotations() {
