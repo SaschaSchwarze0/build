@@ -585,7 +585,7 @@ func (r *ReconcileBuildRun) createTaskRun(ctx context.Context, serviceAccount *c
 		generatedTaskRun *pipelineapi.TaskRun
 	)
 
-	generatedTaskRun, err := resources.GenerateTaskRun(r.config, build, buildRun, serviceAccount.Name, strategy)
+	generatedTaskRun, err := resources.GenerateTaskRun(ctx, r.client, r.config, build, buildRun, serviceAccount.Name, strategy)
 	if err != nil {
 		if updateErr := resources.UpdateConditionWithFalseStatus(ctx, r.client, buildRun, err.Error(), resources.ConditionTaskRunGenerationFailed); updateErr != nil {
 			return nil, resources.HandleError("failed to create taskrun runtime object", err, updateErr)

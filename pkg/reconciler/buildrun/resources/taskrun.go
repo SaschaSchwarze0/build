@@ -5,6 +5,7 @@
 package resources
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"slices"
@@ -13,6 +14,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	buildv1beta1 "github.com/shipwright-io/build/pkg/apis/build/v1beta1"
 	"github.com/shipwright-io/build/pkg/config"
@@ -21,6 +23,7 @@ import (
 	"github.com/shipwright-io/build/pkg/volumes"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/pod"
 	pipelineapi "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
+	pipelineapi_beta "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 )
 
 const (
@@ -171,6 +174,8 @@ func GenerateTaskSpec(
 
 // GenerateTaskRun creates a Tekton TaskRun to be used for a build run
 func GenerateTaskRun(
+	ctx context.Context,
+	kubeClient client.Client,
 	cfg *config.Config,
 	build *buildv1beta1.Build,
 	buildRun *buildv1beta1.BuildRun,
@@ -234,6 +239,37 @@ func GenerateTaskRun(
 				},
 			},
 		},
+	}
+
+	if len(buildRun.OwnerReferences) == 1 && buildRun.OwnerReferences[0].Kind == "CustomRun" && buildRun.Annotations["source-workspace"] != "" {
+		customRunKey := client.ObjectKey{
+			Namespace: buildRun.Namespace,
+			Name:      buildRun.OwnerReferences[0].Name,
+		}
+		customRun := &pipelineapi_beta.CustomRun{}
+		if err = kubeClient.Get(ctx, customRunKey, customRun); err != nil {
+			return nil, err
+		}
+
+		for _, workspaceBinding := range customRun.Spec.Workspaces {
+			if workspaceBinding.Name == buildRun.Annotations["source-workspace"] {
+				// direct assignment not possible because customRun is v1beta1, but TaskRun is v1
+				expectedTaskRun.Spec.Workspaces[0] = pipelineapi.WorkspaceBinding{
+					Name:    workspaceSource,
+					SubPath: workspaceBinding.SubPath,
+
+					ConfigMap:             workspaceBinding.ConfigMap,
+					CSI:                   workspaceBinding.CSI,
+					EmptyDir:              workspaceBinding.EmptyDir,
+					Projected:             workspaceBinding.Projected,
+					PersistentVolumeClaim: workspaceBinding.PersistentVolumeClaim,
+					Secret:                workspaceBinding.Secret,
+
+					// this should not be possible, I think
+					VolumeClaimTemplate: workspaceBinding.VolumeClaimTemplate,
+				}
+			}
+		}
 	}
 
 	taskRunPodTemplate := &pod.PodTemplate{}

@@ -56,6 +56,9 @@ func AmendTaskSpecWithSources(
 	build *buildv1beta1.Build,
 	buildRun *buildv1beta1.BuildRun,
 ) {
+	if buildRun.Annotations["source-workspace"] != "" {
+		return
+	}
 	if localCopy := isLocalCopyBuildSource(build, buildRun); localCopy != nil {
 		sources.AppendLocalCopyStep(cfg, taskSpec, localCopy.Timeout)
 	} else if build.Spec.Source != nil {

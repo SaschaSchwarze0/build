@@ -8,6 +8,7 @@ import (
 	"context"
 
 	pipelineapi "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
+	pipelineapi_beta "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1beta1"
 
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -39,11 +40,13 @@ func NewManager(ctx context.Context, config *config.Config, cfg *rest.Config, op
 
 	ctxlog.Info(ctx, "Registering Components.")
 
+	// Setup Scheme for all resources
 	if err := pipelineapi.AddToScheme(mgr.GetScheme()); err != nil {
 		return nil, err
 	}
-
-	// Setup Scheme for all resources
+	if err := pipelineapi_beta.AddToScheme(mgr.GetScheme()); err != nil {
+		return nil, err
+	}
 	if err := apis.AddToScheme(mgr.GetScheme()); err != nil {
 		return nil, err
 	}
